@@ -34,9 +34,17 @@ Capability stack (required): :robotics :identity :forms :dmn :bpmn :audit-ledger
 
 ## Revenue
 Self-host is AGPL-3.0-or-later (free). Managed tenancy and compliance
-packages are the revenue, in the same ¥50k–150k/月 band the sibling flagships
-anchor against real competitor SaaS — see the flagship `docs/business-model.md`
-files and `90-docs/pricing-intelligence` for the market-anchoring methodology.
+packages are the revenue. **No price is anchored for this vertical yet.**
+This baseline used to cite a ¥50k–150k/月 band "the sibling flagships anchor
+against real competitor SaaS". That band was anchored on HR/recruiting/CRM
+per-seat SaaS (`cloud-itonami-isic-6399`/`6310`/`7810`/`5820`) and has no
+evidenced relationship to this industry. When 24 other verticals were actually
+benchmarked on 2026-08-10 (superproject ADR-2608102000), **every one landed
+between ¥15,000 and ¥60,000/月** — the copied band was too high for almost all
+of them. Price this vertical by measuring its own competitors: see
+`90-docs/pricing-intelligence` for the method, and any sibling
+`docs/business-model.md` carrying a **Market-anchored (2026-08-10)** paragraph
+for a worked example (record who publishes, who does not, and the source URL).
 
 ## Unit Economics (worked example, illustrative)
 One managed tenant (:clay-building-materials/manufacturing):
