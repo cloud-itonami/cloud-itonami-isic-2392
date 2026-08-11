@@ -1,0 +1,450 @@
+(ns claymfg.render-html
+  "Build-time HTML renderer for `docs/samples/operator-console.html`.
+
+  Closes flagship checklist item 2 for this repo: it previously had no
+  demo page and no generator at all. This namespace drives the REAL
+  actor stack (`claymfg.store` -> `claymfg.operation` (langgraph
+  StateGraph) -> `claymfg.advisor` -> `claymfg.governor` ->
+  `claymfg.phase`) and renders whatever that run actually produced.
+  Nothing on the page is hand-typed domain data: every batch,
+  equipment, maintenance-window, shipment, safety concern and ledger
+  fact below is read back out of the store the actor just wrote.
+
+  INPUT PROVENANCE (checked against `claymfg.store/sample-batches` and
+  `sample-equipment` before this file was written):
+
+    - every id this scenario asks the store to RESOLVE is a seeded id.
+      Batches: `batch-001` (verified+registered, shipping headroom),
+      `batch-002` (verified+registered, nearly fully shipped),
+      `batch-003` (UNVERIFIED/unregistered). Equipment: `kiln-001`
+      (verified+registered tunnel kiln), `extruder-002`
+      (UNVERIFIED/unregistered extrusion press). No other batch or
+      equipment id is fed to the actor.
+
+    - `mnt-1`/`mnt-2`/`mnt-3`, `ship-1`/`ship-2`/`ship-3` and
+      `concern-1` are NOT lookups and are deliberately not in the seed:
+      the seed ships `{:maintenance {} :shipments {} :safety-concerns
+      []}` and `:maintenance/schedule` / `:shipment/propose` /
+      `:safety-concern/flag` are the effects that CREATE those records
+      (`claymfg.store/commit-record!`). They are the subject ids of the
+      drafts this run creates, exactly as this repo's own
+      `claymfg.sim` demo driver does. Seeding them would be the
+      fabrication, not the reverse.
+
+  DETERMINISM: no timestamp, no random, no wall-clock value reaches the
+  page. Draft record numbers come from the store's own monotonic
+  `maintenance-sequence`/`shipment-sequence`, batch/equipment tables
+  are `sort-by :id`, and the ledger is the append-only order of this
+  fixed scenario -- so two runs are byte-identical (verify by diffing
+  two consecutive outputs).
+
+  Usage: `clojure -M:dev:render-html [out-file]`
+  (default `docs/samples/operator-console.html`)."
+  (:require [jp-go-dds.skin]
+            [clojure.string :as str]
+            [claymfg.store :as store]
+            [claymfg.registry :as registry]
+            [claymfg.operation :as op]
+            [langgraph.graph :as g]))
+
+(def ^:private coordinator
+  "The same operator context this repo's own `claymfg.sim` uses:
+  phase 3 (`supervised-auto`), so only `:log-production-batch` is ever
+  auto-eligible and everything else escalates to a human."
+  {:actor-id "coord-1" :actor-role :plant-coordinator :phase 3})
+
+(defn- exec! [actor tid request]
+  (g/run* actor {:request request :context coordinator} {:thread-id tid}))
+
+(defn- approve! [actor tid]
+  (g/run* actor {:approval {:status :approved :by "coord-1"}}
+          {:thread-id tid :resume? true}))
+
+(defn run-demo!
+  "Runs a freshly seeded store through a scenario that reaches every
+  disposition this actor can produce, and every HARD rule in
+  `claymfg.governor`.
+
+  Clean lifecycle (all against seeded ids):
+    - `batch-001` production-batch logging with a clean patch --
+      governor-clean, high confidence, and `:log-production-batch` is
+      the ONE member of phase 3's `:auto` set, so it auto-commits with
+      no human.
+    - `mnt-1` maintenance window on the verified+registered
+      `kiln-001` -- `:schedule-maintenance` is deliberately absent from
+      every phase's `:auto` set (`claymfg.phase`), so it escalates even
+      when the governor is clean; a human supervisor approves.
+    - `concern-1` safety concern on `kiln-001` -- ALWAYS
+      `:stake :coordination/safety-concern`, so the governor's own
+      high-stakes gate escalates it independently of the phase gate;
+      approved.
+    - `ship-1` shipment of 5000 kg against `batch-001` (logged 50000 kg,
+      10000 kg already shipped -- inside its own recomputed headroom);
+      escalates, approved.
+
+  HARD holds -- one request per rule, each reached through the seeded
+  record that actually satisfies that rule's condition. None of these
+  ever reaches a human:
+    1. `:not-propose-effect`            request `:effect :direct-write`
+    2. `:unknown-op` (+ 3.)             op `:actuate-kiln-line`
+    3. `:kiln-line-control-blocked`     -- the same request: the mock
+                                        advisor answers an unknown op
+                                        with `:effect :noop`, which is
+                                        outside the closed proposal
+                                        effect allowlist
+    4. `:kiln-line-actuate-blocked`     `mnt-3` on `kiln-001` with
+                                        `:actuate-kiln-line? true`
+    5. `:equipment-not-verified`        `mnt-2` on `extruder-002`
+                                        (seeded `:verified? false`)
+    6. `:already-scheduled`             `mnt-1` a second time
+    7. `:batch-not-verified`            `ship-2` on `batch-003`
+                                        (seeded `:verified? false`)
+    8. `:shipment-weight-exceeded`      `ship-3` on `batch-002`
+                                        (seeded 8000 kg logged, 7500 kg
+                                        shipped) for another 1000 kg
+    9. `:invalid-product-type`          `batch-001` patch declaring a
+                                        product type outside the closed
+                                        `claymfg.registry` set
+   10. `:invalid-dimensional-deviation` `batch-001` patch with a 999%
+                                        dimensional deviation
+   11. `:invalid-defect-rate`           `batch-001` patch with a 999%
+                                        defect rate
+
+  Returns the store. Every value `render` reads afterwards is real
+  store/governor output."
+  []
+  (let [db (-> (store/mem-store) (store/sample-data!))
+        actor (op/build db)]
+
+    ;; --- clean lifecycle ------------------------------------------------
+    (exec! actor "t1" {:op :log-production-batch :effect :propose
+                       :subject "batch-001"
+                       :patch {:product-type :solid-brick
+                               :last-assessed "2026-07-14"}})
+
+    (exec! actor "t2" {:op :schedule-maintenance :effect :propose
+                       :subject "mnt-1"
+                       :value {:equipment-id "kiln-001"
+                               :maintenance-type :kiln-lining-inspection
+                               :scheduled-date "2026-08-01"
+                               :actuate-kiln-line? false}})
+    (approve! actor "t2")
+
+    (exec! actor "t3" {:op :flag-safety-concern :effect :propose
+                       :subject "concern-1"
+                       :value {:equipment-id "kiln-001" :severity :moderate
+                               :description "トンネル窯出口付近の輻射熱上昇、粉塵滞留の兆候"}})
+    (approve! actor "t3")
+
+    (exec! actor "t4" {:op :coordinate-shipment :effect :propose
+                       :subject "ship-1"
+                       :value {:batch-id "batch-001" :weight-kg 5000.0
+                               :destination "buyer-yard-north"}})
+    (approve! actor "t4")
+
+    ;; --- HARD holds (never reach a human) -------------------------------
+    (exec! actor "t5" {:op :log-production-batch :effect :direct-write
+                       :subject "batch-001"
+                       :patch {:product-type :solid-brick}})
+
+    (exec! actor "t6" {:op :actuate-kiln-line :effect :propose
+                       :subject "batch-001"})
+
+    (exec! actor "t7" {:op :schedule-maintenance :effect :propose
+                       :subject "mnt-2"
+                       :value {:equipment-id "extruder-002"
+                               :maintenance-type :die-inspection
+                               :scheduled-date "2026-08-01"
+                               :actuate-kiln-line? false}})
+
+    (exec! actor "t8" {:op :coordinate-shipment :effect :propose
+                       :subject "ship-2"
+                       :value {:batch-id "batch-003" :weight-kg 1000.0
+                               :destination "buyer-yard-south"}})
+
+    (exec! actor "t9" {:op :coordinate-shipment :effect :propose
+                       :subject "ship-3"
+                       :value {:batch-id "batch-002" :weight-kg 1000.0
+                               :destination "buyer-yard-east"}})
+
+    (exec! actor "t10" {:op :schedule-maintenance :effect :propose
+                        :subject "mnt-3"
+                        :value {:equipment-id "kiln-001"
+                                :maintenance-type :force-run
+                                :scheduled-date "2026-09-01"
+                                :actuate-kiln-line? true}})
+
+    (exec! actor "t11" {:op :schedule-maintenance :effect :propose
+                        :subject "mnt-1"
+                        :value {:equipment-id "kiln-001"
+                                :maintenance-type :kiln-lining-inspection
+                                :scheduled-date "2026-08-01"
+                                :actuate-kiln-line? false}})
+
+    (exec! actor "t12" {:op :log-production-batch :effect :propose
+                        :subject "batch-001"
+                        :patch {:product-type :unobtainium-brick}})
+
+    (exec! actor "t13" {:op :log-production-batch :effect :propose
+                        :subject "batch-001"
+                        :patch {:dimensional-deviation-percent 999.0}})
+
+    (exec! actor "t14" {:op :log-production-batch :effect :propose
+                        :subject "batch-001"
+                        :patch {:defect-rate-percent 999.0}})
+    db))
+
+;; ----------------------------- rendering -----------------------------
+
+(defn- esc [v]
+  (-> (str v)
+      (str/replace "&" "&amp;")
+      (str/replace "<" "&lt;")
+      (str/replace ">" "&gt;")))
+
+(defn- nm [v] (if (keyword? v) (name v) (str v)))
+
+(defn- kg
+  "Renders a kilogram figure without a trailing `.0` when it is whole --
+  the store keeps doubles, and `50000.0` reads as a precision claim the
+  plant record does not make."
+  [v]
+  (cond
+    (not (number? v)) "—"
+    (== (double v) (Math/rint (double v))) (str (long v))
+    :else (str v)))
+
+(defn- last-fact-for [ledger subject]
+  (last (filter #(= (:subject %) subject) ledger)))
+
+(defn- status-cell
+  "The subject's last ledger fact. The store ledger only ever receives
+  `:committed` (from the `:commit` node) and hold facts (from the
+  `:hold` node) -- an escalation that is still awaiting a human never
+  reaches the ledger at all, which is why there is no 'pending' state
+  here."
+  [ledger subject]
+  (let [f (last-fact-for ledger subject)]
+    (cond
+      (nil? f) "<span class=\"muted\">no activity</span>"
+      (= :committed (:t f)) "<span class=\"ok\">committed</span>"
+      (= :approval-rejected (:t f)) "<span class=\"critical\">approver rejected</span>"
+      (= :governor-hold (:t f))
+      (str "<span class=\"critical\">HARD hold · "
+           (esc (str/join ", " (map nm (:basis f)))) "</span>")
+      :else "<span class=\"muted\">in progress</span>")))
+
+(defn- ready-cell [ready? verified? registered?]
+  (if ready?
+    "<span class=\"ok\">verified &amp; registered</span>"
+    (str "<span class=\"critical\">not ready · verified?=" (esc verified?)
+         " registered?=" (esc registered?) "</span>")))
+
+(defn- batch-row [ledger {:keys [id product-type material weight-kg shipped-weight-kg
+                                 dimensional-deviation-percent defect-rate-percent
+                                 last-assessed] :as b}]
+  (format (str "        <tr><td><code>%s</code></td><td>%s</td><td>%s</td>"
+               "<td class=\"num\">%s</td><td class=\"num\">%s</td><td class=\"num\">%s</td>"
+               "<td class=\"num\">%s</td><td class=\"num\">%s</td><td>%s</td><td>%s</td><td>%s</td></tr>")
+          (esc id) (esc (nm product-type)) (esc material)
+          (kg weight-kg) (kg shipped-weight-kg)
+          ;; the governor's own headroom arithmetic, recomputed from the
+          ;; batch's own permanent fields -- never a self-reported figure
+          (kg (when (and (number? weight-kg) (number? shipped-weight-kg))
+                (- (double weight-kg) (double shipped-weight-kg))))
+          (esc dimensional-deviation-percent) (esc defect-rate-percent)
+          (esc last-assessed)
+          (ready-cell (registry/batch-ready? b)
+                      (registry/batch-verified? b) (registry/batch-registered? b))
+          (status-cell ledger id)))
+
+(defn- equipment-row [{:keys [id kind last-maintenance-date
+                              last-scheduled-maintenance-date] :as e}]
+  (format (str "        <tr><td><code>%s</code></td><td>%s</td><td>%s</td>"
+               "<td>%s</td><td>%s</td></tr>")
+          (esc id) (esc (nm kind))
+          (ready-cell (registry/equipment-ready? e)
+                      (registry/equipment-verified? e) (registry/equipment-registered? e))
+          (if last-maintenance-date (esc last-maintenance-date)
+              "<span class=\"muted\">never</span>")
+          (if last-scheduled-maintenance-date (esc last-scheduled-maintenance-date)
+              "<span class=\"muted\">none this run</span>")))
+
+(defn- maintenance-row [ledger {:keys [id equipment-id maintenance-type scheduled-date
+                                       maintenance-number actuate-kiln-line?]}]
+  (format (str "        <tr><td><code>%s</code></td><td><code>%s</code></td><td>%s</td>"
+               "<td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>")
+          (esc id) (esc equipment-id) (esc (nm maintenance-type)) (esc scheduled-date)
+          (esc maintenance-number)
+          (if (true? actuate-kiln-line?)
+            "<span class=\"critical\">true</span>"
+            "<span class=\"ok\">false (draft only)</span>")
+          (status-cell ledger id)))
+
+(defn- shipment-row [ledger {:keys [id batch-id weight-kg destination shipment-number]}]
+  (format (str "        <tr><td><code>%s</code></td><td><code>%s</code></td>"
+               "<td class=\"num\">%s</td><td>%s</td><td><code>%s</code></td><td>%s</td></tr>")
+          (esc id) (esc batch-id) (kg weight-kg) (esc destination)
+          (esc shipment-number) (status-cell ledger id)))
+
+(defn- concern-row [{:keys [id equipment-id severity description]}]
+  (format "        <tr><td><code>%s</code></td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>"
+          (esc id) (esc equipment-id) (esc (nm severity)) (esc description)))
+
+(defn- ledger-row [{:keys [t op subject basis violations summary]}]
+  (format "        <tr><td>%s</td><td><code>%s</code></td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>"
+          (case t
+            :committed "<span class=\"ok\">committed</span>"
+            :governor-hold "<span class=\"critical\">HARD hold</span>"
+            :approval-rejected "<span class=\"critical\">approval rejected</span>"
+            (esc (nm t)))
+          (esc (nm (or op :n-a))) (esc subject)
+          (esc (str/join ", " (map nm basis)))
+          (if (seq violations)
+            (esc (str/join " / " (map :detail violations)))
+            (esc (or summary "")))))
+
+(def ^:private action-gate-rows
+  ;; Static description of this actor's own closed op contract
+  ;; (`claymfg.governor/allowed-ops`, `allowed-proposal-effects`,
+  ;; `high-stakes`, and `claymfg.phase/phases`) -- a description of FIXED
+  ;; behavior, not runtime telemetry, so it is legitimately hand-written
+  ;; rather than derived from a live run. Each row was checked against
+  ;; those two namespaces: phase 3's `:auto` set has exactly one member
+  ;; (`:log-production-batch`); `:schedule-maintenance` is deliberately
+  ;; absent from every phase's `:auto` set; `:flag-safety-concern` is
+  ;; always `:stake :coordination/safety-concern` so the governor's own
+  ;; high-stakes gate escalates it independently of the phase gate.
+  ["        <tr><td><code>:log-production-batch</code></td><td><span class=\"ok\">phase-3 auto-commit when governor-clean</span></td><td>product-type in the closed set · dimensional-deviation 0–100% · defect-rate 0–100%</td></tr>"
+   "        <tr><td><code>:schedule-maintenance</code></td><td><span class=\"warn\">ALWAYS human approval · never in any phase's <code>:auto</code> set</span></td><td>equipment independently re-checked <code>verified? AND registered?</code> · double-schedule refused · <code>:actuate-kiln-line? true</code> HARD-blocked, permanently</td></tr>"
+   "        <tr><td><code>:flag-safety-concern</code></td><td><span class=\"warn\">ALWAYS human approval · high-stakes gate</span></td><td>never blocked on the referenced equipment being verified — a concern may be raised about any unit</td></tr>"
+   "        <tr><td><code>:coordinate-shipment</code></td><td><span class=\"warn\">phase-3: human approval (not auto-eligible)</span></td><td>batch independently re-checked <code>verified? AND registered?</code> · shipped-to-date + claimed weight independently recomputed against the batch's own logged weight · un-checkable headroom is not headroom</td></tr>"
+   "        <tr><td><em>anything else</em></td><td><span class=\"critical\">HARD hold · never reaches a human</span></td><td>op outside the closed allowlist, proposal effect outside the closed propose-shaped effect set, or a request whose own <code>:effect</code> is not <code>:propose</code></td></tr>"])
+
+(defn render
+  "Renders the full operator-console.html document from a store `db`
+  that has already run `run-demo!` (or any other real scenario)."
+  [db]
+  (let [ledger (vec (store/ledger db))
+        batches (store/all-batches db)
+        equipment (store/all-equipment db)
+        maintenance (store/all-maintenance db)
+        shipments (keep #(store/shipment db (get % "shipment_id"))
+                        (store/shipment-history db))
+        concerns (store/safety-concerns db)
+        hold-rules (->> ledger
+                        (filter #(= :governor-hold (:t %)))
+                        (mapcat :basis)
+                        distinct
+                        vec)]
+    (str
+     "<!DOCTYPE html>\n"
+     "<html lang=\"en\"><head><meta charset=\"utf-8\">"
+     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"
+     "<title>cloud-itonami-isic-2392 · clay building materials — Operator Console</title><style>"
+     (jp-go-dds.skin/dds+skin)
+     "</style></head><body>\n"
+     "<header class=\"bar\">\n"
+     "  <h1>Manufacture of clay building materials (ISIC 2392) — Operator Console</h1>\n"
+     "  <span class=\"badge\">read-only sample · governor-gated · maintenance scheduling always human-approved</span>\n"
+     "</header>\n"
+     "<main>\n"
+     "  <p class=\"subtitle\">Build-time snapshot generated from <code>claymfg.store</code> by <code>claymfg.render-html</code> (<code>clojure -M:dev:render-html</code>), by actually running the actor graph — <code>claymfg.operation</code> → <code>claymfg.advisor</code> → <code>claymfg.governor</code> → <code>claymfg.phase</code>. Every row below is store output from that run. Deterministic: no timestamps, no wall-clock, byte-identical across reruns.</p>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>Production batches</h2>\n"
+     "    <p class=\"muted\">Kiln-fired lots. <strong>Headroom</strong> is recomputed here from the batch's own logged weight minus its own cumulative shipped weight — the same ground truth <code>claymfg.governor</code> uses, never a self-reported figure from a shipment proposal.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Batch</th><th>Product type</th><th>Material</th><th>Logged weight (kg)</th><th>Shipped to date (kg)</th><th>Headroom (kg)</th><th>Dim. deviation %</th><th>Defect rate %</th><th>Last assessed</th><th>QC status</th><th>Last ledger fact</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" (map (partial batch-row ledger) batches)) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>Plant equipment</h2>\n"
+     "    <p class=\"muted\">Extrusion-press / kiln-line units. Maintenance may only ever be <em>scheduled</em> against a unit that is independently both <code>:verified?</code> and <code>:registered?</code>; this actor never actuates a press or kiln line.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Unit</th><th>Kind</th><th>Commissioning status</th><th>Last maintenance</th><th>Window scheduled this run</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" (map equipment-row equipment)) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>Maintenance windows committed this run</h2>\n"
+     "    <p class=\"muted\">DRAFT windows only (<code>claymfg.registry/register-maintenance</code>) — a record a plant coordinator would keep, not an act on the equipment. Windows that were HARD-held never appear here; they are in the ledger below.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Window</th><th>Equipment</th><th>Type</th><th>Scheduled date</th><th>Draft record no.</th><th>actuate-kiln-line?</th><th>Last ledger fact</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" (map (partial maintenance-row ledger) maintenance)) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>Shipments coordinated this run</h2>\n"
+     "    <p class=\"muted\">DRAFT shipment coordination records (<code>claymfg.registry/register-shipment</code>) — no freight carrier is ever dispatched by this actor.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Shipment</th><th>Batch</th><th>Weight (kg)</th><th>Destination</th><th>Draft record no.</th><th>Last ledger fact</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" (map (partial shipment-row ledger) shipments)) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>Safety concerns flagged this run</h2>\n"
+     "    <p class=\"muted\">Append-only. A safety concern is never gated on the referenced unit being verified, and never auto-commits — it always reaches a human supervisor.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Concern</th><th>Equipment</th><th>Severity</th><th>Description</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" (map concern-row concerns)) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>Action gate (Clay Plant Operations Governor + phase 3 <code>supervised-auto</code>)</h2>\n"
+     "    <p class=\"muted\">Fixed contract, not telemetry. HARD holds cannot be overridden by any approver or any phase.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Op</th><th>Gate</th><th>Independent re-checks</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" action-gate-rows) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>HARD hold rules reached by this run</h2>\n"
+     "    <p class=\"muted\">Collected from the ledger below — every rule name here was produced by <code>claymfg.governor</code> during this run, not listed by hand.</p>\n"
+     "    <p>" (str/join " · " (map #(str "<code>" (esc (nm %)) "</code>") hold-rules)) "</p>\n"
+     "  </section>\n"
+
+     "  <section class=\"card\">\n"
+     "    <h2>Audit ledger (this run)</h2>\n"
+     "    <p class=\"muted\">Append-only decision-fact log. Commits carry the fields the advisor cited; HARD holds carry the governor's own rule names and its own rejection detail. An escalation still awaiting a human is not a ledger fact — only the commit or the hold that follows it is.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Fact</th><th>Op</th><th>Subject</th><th>Basis</th><th>Detail / summary</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" (map ledger-row ledger)) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+     "</main>\n"
+     "<footer>\n"
+     "  <p>Generated by <code>claymfg.render-html</code> from a real actor run. No usage, revenue or customer metric appears on this page — none is measured.</p>\n"
+     "</footer>\n"
+     "</body></html>\n")))
+
+(defn -main [& args]
+  (let [out (or (first args) "docs/samples/operator-console.html")
+        db (run-demo!)
+        html (render db)]
+    (spit out html)
+    (println "wrote" out "(" (count (store/ledger db)) "ledger facts,"
+             (count (store/maintenance-history db)) "maintenance drafts,"
+             (count (store/shipment-history db)) "shipment drafts,"
+             (count (store/safety-concerns db)) "safety concerns )")))

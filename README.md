@@ -79,6 +79,10 @@ clojure -M:dev:test
 # Run the demo
 clojure -M:dev:run
 
+# Regenerate docs/samples/operator-console.html by actually running the actor
+# (store -> operation -> governor -> phase). Deterministic: byte-identical reruns.
+clojure -M:dev:render-html
+
 # Lint
 clojure -M:lint
 ```
