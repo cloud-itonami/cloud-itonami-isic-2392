@@ -12,7 +12,12 @@
  ;; :local/root -- the build-time HTML renderer (`:render-html` below) must
  ;; resolve it from a standalone fork too (see that library's own deps.edn
  ;; note about :local/root breaking inside a consumer's git cache).
- :deps {io.github.kotoba-lang/langgraph
+ :deps {
+        ;; kotoba.lang.text, not clojure.string. Pinned as an explicit floor:
+        ;; tools.deps takes the NEWEST sha it is shown, so without a floor here
+        ;; this repo silently rides whatever a sibling happens to name.
+        io.github.kotoba-lang/text {:git/sha "73bdb13ae7a3d004b44bca08be03a3191157a38f"}
+       io.github.kotoba-lang/langgraph
         {:local/root "../../kotoba-lang/langgraph"}
         io.github.kotoba-lang/langchain
         {:local/root "../../kotoba-lang/langchain"}
