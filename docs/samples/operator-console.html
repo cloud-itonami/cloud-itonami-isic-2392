@@ -2467,7 +2467,7 @@ img,svg { max-width: 100%; height: auto; }</style></head><body>
   <span class="badge">read-only sample · governor-gated · maintenance scheduling always human-approved</span>
 </header>
 <main>
-  <p class="subtitle">Build-time snapshot generated from <code>claymfg.store</code> by <code>claymfg.render-html</code> (<code>clojure -M:dev:render-html</code>), by actually running the actor graph — <code>claymfg.operation</code> → <code>claymfg.advisor</code> → <code>claymfg.governor</code> → <code>claymfg.phase</code>. Every row below is store output from that run. Deterministic: no timestamps, no wall-clock, byte-identical across reruns.</p>
+  <p class="subtitle">Build-time snapshot generated from <code>claymfg.store</code> by <code>claymfg.render-html</code> (<code>kbb -M:dev:render-html</code>), by actually running the actor graph — <code>claymfg.operation</code> → <code>claymfg.advisor</code> → <code>claymfg.governor</code> → <code>claymfg.phase</code>. Every row below is store output from that run. Deterministic: no timestamps, no wall-clock, byte-identical across reruns.</p>
   <section class="card">
     <h2>Production batches</h2>
     <p class="muted">Kiln-fired lots. <strong>Headroom</strong> is recomputed here from the batch's own logged weight minus its own cumulative shipped weight — the same ground truth <code>claymfg.governor</code> uses, never a self-reported figure from a shipment proposal.</p>

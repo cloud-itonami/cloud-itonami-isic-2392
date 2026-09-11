@@ -6,7 +6,7 @@
 > business models; fleet actors carry this generated baseline. Unit-economics
 > figures below are illustrative and **not yet measured at fleet scale** — a
 > shape, not a reported metric. Regenerate with
-> `nbb scripts/gen-actor-business-model.cljs <repo>` in `kotoba-lang/industry`.
+> `kbb --backend sci scripts/gen-actor-business-model.cljk <repo>` in `kotoba-lang/industry`.
 
 ## Classification
 - Repository: `cloud-itonami-isic-2392` ([github.com/cloud-itonami/cloud-itonami-isic-2392](https://github.com/cloud-itonami/cloud-itonami-isic-2392))

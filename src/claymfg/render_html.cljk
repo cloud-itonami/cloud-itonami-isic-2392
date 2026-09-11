@@ -38,7 +38,7 @@
   fixed scenario -- so two runs are byte-identical (verify by diffing
   two consecutive outputs).
 
-  Usage: `clojure -M:dev:render-html [out-file]`
+  Usage: `kbb -M:dev:render-html [out-file]`
   (default `docs/samples/operator-console.html`)."
   (:require [jp-go-dds.skin]
             [kotoba.lang.text :as str]
@@ -349,7 +349,7 @@
      "  <span class=\"badge\">read-only sample · governor-gated · maintenance scheduling always human-approved</span>\n"
      "</header>\n"
      "<main>\n"
-     "  <p class=\"subtitle\">Build-time snapshot generated from <code>claymfg.store</code> by <code>claymfg.render-html</code> (<code>clojure -M:dev:render-html</code>), by actually running the actor graph — <code>claymfg.operation</code> → <code>claymfg.advisor</code> → <code>claymfg.governor</code> → <code>claymfg.phase</code>. Every row below is store output from that run. Deterministic: no timestamps, no wall-clock, byte-identical across reruns.</p>\n"
+     "  <p class=\"subtitle\">Build-time snapshot generated from <code>claymfg.store</code> by <code>claymfg.render-html</code> (<code>kbb -M:dev:render-html</code>), by actually running the actor graph — <code>claymfg.operation</code> → <code>claymfg.advisor</code> → <code>claymfg.governor</code> → <code>claymfg.phase</code>. Every row below is store output from that run. Deterministic: no timestamps, no wall-clock, byte-identical across reruns.</p>\n"
 
      "  <section class=\"card\">\n"
      "    <h2>Production batches</h2>\n"
