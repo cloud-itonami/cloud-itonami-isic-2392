@@ -8,8 +8,8 @@ The capability layer lives in `kotoba-lang/*` libraries. This repo holds the
 business blueprint and operator contracts.
 
 ```bash
-clojure -M:test
-clojure -M:lint
+kbb -M:test
+kbb -M:lint
 ```
 
 ## Rules
