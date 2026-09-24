@@ -4,6 +4,10 @@
 ;; repository. :deps only -- no :paths, so this file adds a dependency and
 ;; chooses no classpath.
 {:deps {
+        ;; kotoba.robotics.process: the process-physics solvers and probe this
+        ;; repo's physics.edn runs on (physical-AI bot, scripts/physical-ai-bots).
+        io.github.kotoba-lang/robotics {:local/root "../../kotoba-lang/robotics"}
+
         ;; kotoba.test (clojure.test-compatible surface), not clojure.test --
         ;; scripts/migrate-clojure-test-to-kotoba-test.cljk. Explicit floor.
         io.github.kotoba-lang/test {:git/url "https://github.com/kotoba-lang/test.git"
