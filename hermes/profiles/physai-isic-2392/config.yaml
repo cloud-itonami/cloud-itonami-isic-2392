@@ -1,42 +1,42 @@
 # Host-local blocks (command_allowlist, onboarding, secrets, skills, terminal) are kept on the host and omitted here.
 model:
-  provider: murakumo
-  default: mishima
-  base_url: https://api.murakumo.cloud/v1
-  context_length: 131072
+  provider: kotoba
+  default: qwen3.8-27b-whitehacker
+  base_url: https://api.kotoba.cloud/v1
+  context_length: 262144
   max_tokens: 8192
 providers:
-  murakumo:
-    base_url: https://api.murakumo.cloud/v1
+  kotoba:
+    base_url: https://api.kotoba.cloud/v1
     api_mode: chat_completions
-    models:
-      mishima:
-        context_length: 131072
+    key_env: KOTOBA_API_TOKEN
     stale_timeout_seconds: 600
     request_timeout_seconds: 900
-    extra_headers:
-      HTTP-Referer: https://itonami.cloud
-      X-Title: Itonami By KotobaLabs
+    models:
+      qwen3.8-27b-whitehacker:
+        context_length: 262144
+      qwen3.8-flash-next-whitehacker:
+        context_length: 131072
   custom:
     models:
-      mishima:
+      qwen3.8-27b-whitehacker:
         stale_timeout_seconds: 600
         timeout_seconds: 900
 auxiliary:
   compression:
-    provider: murakumo
-    model: mishima
-    base_url: https://api.murakumo.cloud/v1
+    provider: kotoba
+    model: qwen3.8-flash-next-whitehacker
+    base_url: https://api.kotoba.cloud/v1
     reasoning_effort: none
   title_generation:
-    provider: murakumo
-    model: mishima
-    base_url: https://api.murakumo.cloud/v1
+    provider: kotoba
+    model: qwen3.8-flash-next-whitehacker
+    base_url: https://api.kotoba.cloud/v1
     reasoning_effort: none
   web_extract:
-    provider: murakumo
-    model: mishima
-    base_url: https://api.murakumo.cloud/v1
+    provider: kotoba
+    model: qwen3.8-flash-next-whitehacker
+    base_url: https://api.kotoba.cloud/v1
 agent:
   max_turns: 80
 approvals:
