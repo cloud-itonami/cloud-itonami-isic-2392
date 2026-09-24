@@ -2,7 +2,7 @@
   "The Store contract as executable tests. Single MemStore backend --
   see `claymfg.store` ns docstring for why a second (Datomic-backed)
   backend is out of scope for this build."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [claymfg.store :as store]))
 
 (defn- seeded [] (-> (store/mem-store) (store/sample-data!)))
