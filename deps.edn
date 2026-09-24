@@ -13,6 +13,10 @@
  ;; resolve it from a standalone fork too (see that library's own deps.edn
  ;; note about :local/root breaking inside a consumer's git cache).
  :deps {
+        ;; kotoba.robotics.process: the process-physics solvers and probe this
+        ;; repo's physics.edn runs on (physical-AI bot, scripts/physical-ai-bots).
+        io.github.kotoba-lang/robotics {:local/root "../../kotoba-lang/robotics"}
+
         ;; kotoba.test (clojure.test-compatible surface), not clojure.test --
         ;; scripts/migrate-clojure-test-to-kotoba-test.cljk. Explicit floor.
         io.github.kotoba-lang/test {:git/url "https://github.com/kotoba-lang/test.git"
@@ -33,7 +37,14 @@
         {:git/url "https://github.com/kotoba-lang/jp-go-digital-design-system"
          :git/sha "83db99546eabc53613ae826ea41d1533a3c574af"}}
  :aliases
- {;; offline workspace dev -- pin transitive langchain to local checkout
+ {
+  ;; kbb -M:physics -> the physical-AI bot's measurement: runs physics.edn on
+  ;; kotoba.robotics.process and prints one probe map. Exit 2 = could not measure.
+  :physics {:main-opts ["-m" "kotoba.robotics.process.probe"]}
+  ;; kbb -M:physai-test -> test/'s .cljk on kbb's runner (the bot's test count;
+  ;; a .kotoba vertical's own :test may refuse kbb on purpose).
+  :physai-test {:extra-paths ["test" "test-physai"] :main-opts ["-m" "cognitect.test-runner"]}
+;; offline workspace dev -- pin transitive langchain to local checkout
   ;; (kept for parity with sibling actors' deps.edn shape; redundant
   ;; with the top-level :deps override above).
   :dev {:override-deps

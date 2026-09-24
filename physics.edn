@@ -1,0 +1,45 @@
+;; What this vertical's robot physically does, declared for
+;; kotoba.robotics.process (kotoba-lang/robotics). `kbb -M:dev:physics` runs it.
+;;
+;; The README has no "Robotics premise" section; its Scope names the plant
+;; this actor coordinates (ISIC 2392): winning/pugging clay, extruding or
+;; press-moulding, drying and firing bricks, blocks and roof tiles in a
+;; tunnel or periodic kiln, then shipping. The physical work of that plant
+;; taken here: cooling fired bricks in the kiln's cooling zone until they
+;; can be dehacked, carrying strapped brick packs to the stockyard, and
+;; lifting roof tiles onto kiln cassettes.
+;;
+;; Every number without a cited source is marked `estimate` in its :basis.
+;; Replacing an estimate with a sourced value is this bot's growth work.
+{:physics/schema "itonami.physical-ai.spec.v1"
+ :repo "cloud-itonami/cloud-itonami-isic-2392"
+ :cases
+ [{:id :fired-brick-cooling
+   :kind :thermal
+   :procedure "fired brick (half thickness 32.5 mm, centre adiabatic) leaves the firing zone at 1000 C into 30 C cooling air; its centre must fall below 60 C before the dehacking robot handles it"
+   :params {:thickness-m 0.0325 :conductivity-w-mk 0.8 :density-kg-m3 1800.0 :specific-heat-j-kgk 900.0
+            :t0-c 1000.0 :t-hot-c 30.0 :h-back-w-m2k 0.0
+            :threshold-c 60.0 :threshold-direction :falling :duration-s 86400.0 :nodes 11}
+   :sweep {:param :h-front-w-m2k :values [10.0 15.0 25.0 40.0 60.0]}
+   :quantity :time-to-threshold-s
+   :limit {:max 21600.0 :basis "estimate: a car spends about 6 h in the cooling zone at the kiln's push rate"}
+   :boundary {:lo 5.0 :hi 150.0}}
+  {:id :brick-pack-to-stockyard
+   :kind :transport
+   :procedure "fork AMR carries a strapped 1.5 t pack of fired bricks from the dehacking line out over the stockyard surface; sweep = rolling resistance from smooth concrete to loose gravel"
+   :params {:mass-kg 1800.0 :payload-kg 1500.0 :distance-m 120.0 :v-max-mps 2.0 :a-max-mps2 0.5
+            :brake-decel-mps2 1.2 :drive-force-n 3500.0
+            :cog-height-m 0.55 :payload-cog-height-m 0.75 :support-half-length-m 0.70 :max-time-s 3600.0}
+   :sweep {:param :crr :values [0.015 0.03 0.05 0.08 0.10]}
+   :quantity :cycle-time-s
+   :limit {:max 75.0 :basis "estimate: one stockyard leg within 75 s keeps pace with the dehacking line"}
+   :boundary {:lo 0.01 :hi 0.105}}
+  {:id :roof-tile-to-cassette
+   :kind :manipulator
+   :procedure "arm lifts pressed green roof tiles from the press take-off onto the H-cassette of the kiln car"
+   :params {:l1-m 0.55 :l2-m 0.45 :m1-kg 7.0 :m2-kg 5.0
+            :from [0.65 0.20] :to [0.35 0.65] :duration-s 1.5 :steps 400}
+   :sweep {:param :payload-kg :values [3.0 6.0 9.0 12.0 15.0]}
+   :quantity :peak-tau1-nm
+   :limit {:max 180.0 :basis "estimate: continuous shoulder torque of a ~15 kg-payload handling arm class"}
+   :boundary {:lo 0.5 :hi 60.0}}]}

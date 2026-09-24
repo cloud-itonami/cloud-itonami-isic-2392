@@ -1,0 +1,20 @@
+(ns claymfg.physics-spec-test
+  "physics.edn is this repo's declaration of what its robot physically does.
+  It must be valid, and every declared run must produce a measurement --
+  the physical-AI bot treats anything less as 'could not measure'."
+  (:require [kotoba.test :refer [deftest is testing]]
+            [kotoba.robotics.process :as process]
+            [kotoba.robotics.process.probe :as probe]))
+
+(def spec (probe/read-spec "physics.edn"))
+
+(deftest physics-spec-is-valid
+  (is (some? spec))
+  (is (= [] (process/spec-problems spec))))
+
+(deftest every-declared-run-is-measured
+  (let [p (process/probe spec)]
+    (is (pos? (:expected p)))
+    (is (= (:expected p) (:count p)))
+    (testing "every limit names its basis"
+      (is (every? (comp seq :basis :limit) (:cases spec))))))
